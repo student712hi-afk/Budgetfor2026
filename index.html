@@ -1,149 +1,146 @@
 <!doctype html>
+<!--
+  Budgetfor2026 static app
+  Local run: open this file directly in a browser (double-click index.html).
+  Vercel deploy: import repo/project as a static site (no build command, output directory root).
+  GitHub Pages: Settings -> Pages -> Deploy from branch -> main/(root).
+-->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Budget Control Panel</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="style.css" />
+    <title>Budgetfor2026</title>
+    <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Primary">
-        <div class="brand">Budget<span>OS</span></div>
-        <nav class="nav" id="spaNav">
-          <button class="nav-link active" data-view="dashboard">Dashboard</button>
-          <button class="nav-link" data-view="income">Income</button>
-          <button class="nav-link" data-view="expenses">Expenses</button>
-          <button class="nav-link" data-view="debts">Debt Planner</button>
-          <button class="nav-link" data-view="goals">Goals</button>
-          <button class="nav-link" data-view="networth">Net Worth</button>
-          <button class="nav-link" data-view="settings">Data</button>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">Budget<span>2026</span></div>
+        <nav id="nav">
+          <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+          <button class="nav-btn" data-view="transactions">Transactions</button>
+          <button class="nav-btn" data-view="budgets">Budgets</button>
+          <button class="nav-btn" data-view="debts">Debts</button>
+          <button class="nav-btn" data-view="goals">Goals</button>
+          <button class="nav-btn" data-view="reports">Reports</button>
+          <button class="nav-btn" data-view="settings">Settings</button>
         </nav>
       </aside>
 
-      <main class="main">
-        <header class="topbar">
+      <main class="content">
+        <header class="topbar card">
           <div>
             <h1 id="viewTitle">Dashboard</h1>
-            <p class="subtle">Last backup: <span id="backupTimestamp">Never</span></p>
+            <p class="muted">Last saved: <span id="lastSaved">—</span> · Last backup: <span id="lastBackup">—</span></p>
           </div>
-          <div class="topbar-actions">
-            <label for="monthFilter" class="sr-only">Month filter</label>
-            <input id="monthFilter" type="month" />
-            <button id="quickAddBtn" class="btn primary">+ Quick Add</button>
+          <div class="toolbar">
+            <input id="activeMonth" type="month" />
+            <button class="btn primary" data-open-modal="transaction" data-mode="create">+ Add Transaction</button>
           </div>
         </header>
 
         <section id="dashboard" class="view active">
-          <div class="cards-grid" id="summaryCards"></div>
-
-          <div class="panel-grid two-col">
-            <article class="panel">
-              <h2>Income vs Expense</h2>
-              <canvas id="barChart" width="560" height="260" aria-label="Income vs expense bar chart"></canvas>
-            </article>
-            <article class="panel">
-              <h2>Expense Categories</h2>
-              <canvas id="pieChart" width="560" height="260" aria-label="Expense category pie chart"></canvas>
-            </article>
+          <div id="summaryCards" class="grid cards"></div>
+          <div class="grid two">
+            <article class="card"><h3>Income vs Expenses</h3><canvas id="chartBar" width="520" height="240"></canvas></article>
+            <article class="card"><h3>Expense Categories</h3><canvas id="chartPie" width="520" height="240"></canvas></article>
           </div>
-
-          <div class="panel-grid">
-            <article class="panel">
-              <h2>6-Month Cash Flow Trend</h2>
-              <canvas id="trendChart" width="1160" height="280" aria-label="Cash flow trend"></canvas>
-            </article>
-            <article class="panel">
-              <h2>Financial Health</h2>
-              <div id="healthPanel"></div>
-            </article>
+          <div class="grid one">
+            <article class="card"><h3>Net Cash Flow (6 months)</h3><canvas id="chartTrend" width="1060" height="260"></canvas></article>
           </div>
         </section>
 
-        <section id="income" class="view">
-          <div class="view-header">
-            <h2>Income Streams</h2>
-            <button class="btn primary" data-open-modal="incomeModal">Add Income</button>
-          </div>
-          <div class="stats-row" id="incomeStats"></div>
-          <div class="panel"><div id="incomeTable"></div></div>
-        </section>
-
-        <section id="expenses" class="view">
-          <div class="view-header">
-            <h2>Expenses</h2>
-            <div class="button-group">
-              <button class="btn" data-open-modal="categoryModal">Category Limits</button>
-              <button class="btn primary" data-open-modal="expenseModal">Add Expense</button>
+        <section id="transactions" class="view">
+          <div class="section-head">
+            <h2>Transactions</h2>
+            <div class="toolbar">
+              <input id="searchTx" type="search" placeholder="Search description" />
+              <select id="filterCategory"></select>
             </div>
           </div>
-          <div class="stats-row" id="expenseStats"></div>
-          <div class="panel"><div id="expenseTable"></div></div>
+          <div id="transactionsTable" class="card"></div>
+        </section>
+
+        <section id="budgets" class="view">
+          <div class="section-head">
+            <h2>Budgets</h2>
+            <button class="btn" data-open-modal="budget" data-mode="create">Edit Category Limit</button>
+          </div>
+          <div id="budgetList" class="card"></div>
         </section>
 
         <section id="debts" class="view">
-          <div class="view-header">
-            <h2>Debt Payoff Simulator</h2>
-            <button class="btn primary" data-open-modal="debtModal">Add Debt</button>
+          <div class="section-head">
+            <h2>Debts</h2>
+            <div class="toolbar">
+              <button class="btn" data-open-modal="debt" data-mode="create">Add Debt</button>
+              <button class="btn" data-open-modal="payment" data-mode="create">Record Payment</button>
+            </div>
           </div>
-          <div class="panel-grid two-col">
-            <article class="panel"><div id="debtTable"></div></article>
-            <article class="panel"><div id="debtSimulation"></div></article>
+          <div class="grid two">
+            <article id="debtList" class="card"></article>
+            <article class="card"><h3>Payoff Simulator</h3><div id="debtSimulator"></div></article>
           </div>
         </section>
 
         <section id="goals" class="view">
-          <div class="view-header">
-            <h2>Savings Goals</h2>
-            <button class="btn primary" data-open-modal="goalModal">Add Goal</button>
+          <div class="section-head">
+            <h2>Goals</h2>
+            <button class="btn" data-open-modal="goal" data-mode="create">Add Goal</button>
           </div>
-          <div class="panel"><div id="goalTable"></div></div>
+          <div id="goalList" class="card"></div>
         </section>
 
-        <section id="networth" class="view">
-          <div class="view-header">
-            <h2>Net Worth Tracker</h2>
-            <button class="btn primary" data-open-modal="assetModal">Add Asset</button>
+        <section id="reports" class="view">
+          <div class="section-head">
+            <h2>Reports</h2>
+            <div class="toolbar">
+              <select id="reportTrendMetric">
+                <option value="net">Net cash flow</option>
+                <option value="income">Income</option>
+                <option value="expense">Expenses</option>
+              </select>
+              <button id="exportReport" class="btn">Export report (JSON)</button>
+            </div>
           </div>
-          <div class="panel-grid two-col">
-            <article class="panel"><div id="assetTable"></div></article>
-            <article class="panel"><canvas id="netWorthChart" width="560" height="300"></canvas></article>
+          <article id="reportSummary" class="card"></article>
+          <div class="grid two">
+            <article id="reportCategory" class="card"></article>
+            <article class="card"><h3>Category Pie</h3><canvas id="reportPie" width="520" height="240"></canvas></article>
           </div>
+          <article class="card"><h3>6-Month Trends</h3><canvas id="reportTrend" width="1060" height="260"></canvas></article>
         </section>
 
         <section id="settings" class="view">
-          <div class="view-header"><h2>Data Management</h2></div>
-          <article class="panel settings-panel">
-            <button id="exportBtn" class="btn">Export JSON</button>
-            <label class="btn" for="importInput" role="button">Import JSON</label>
-            <input id="importInput" type="file" accept="application/json" />
-            <button id="resetBtn" class="btn danger">Reset All Data</button>
+          <h2>Settings</h2>
+          <article class="card settings">
+            <label><input type="checkbox" id="toggleCents" checked /> Show cents</label>
+            <button id="saveSnapshot" class="btn">Save net worth snapshot</button>
+            <button id="exportData" class="btn">Export full data JSON</button>
+            <label class="btn" for="importData">Import JSON</label>
+            <input id="importData" type="file" accept="application/json" hidden />
+            <button id="resetData" class="btn danger">Reset data</button>
+            <div id="importPreview" class="muted"></div>
           </article>
         </section>
       </main>
     </div>
 
-    <dialog id="formModal" aria-labelledby="formModalTitle">
-      <form id="dynamicForm" method="dialog">
+    <dialog id="modal">
+      <form id="modalForm" method="dialog" novalidate>
         <div class="modal-head">
-          <h3 id="formModalTitle"></h3>
-          <button type="button" class="icon-btn" data-close-modal>&times;</button>
+          <h3 id="modalTitle">Form</h3>
+          <button type="button" class="icon" data-close-modal>×</button>
         </div>
-        <div id="formFields"></div>
-        <p id="formError" class="error"></p>
-        <div class="modal-actions">
+        <div id="modalFields" class="fields"></div>
+        <p id="modalError" class="error"></p>
+        <div class="toolbar right">
           <button type="button" class="btn" data-close-modal>Cancel</button>
           <button type="submit" class="btn primary">Save</button>
         </div>
       </form>
     </dialog>
 
-    <script src="script.js"></script>
+    <script src="./script.js"></script>
   </body>
 </html>

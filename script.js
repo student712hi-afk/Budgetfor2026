@@ -1,423 +1,409 @@
 (() => {
   'use strict';
 
-  const APP_VERSION = 1;
-  const STORAGE_KEY = 'budgetos_data_v1';
+  const SCHEMA_VERSION = 2;
+  const STORAGE_KEY = 'budgetfor2026_store';
+  const DEFAULT_CATEGORIES = ['Housing', 'Food', 'Transport', 'Utilities', 'Health', 'Leisure', 'Debt Payment', 'Other'];
 
-  const Util = {
-    uid: () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-    monthKey: (d = new Date()) => new Date(d).toISOString().slice(0, 7),
-    money: (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n || 0),
-    percent: (n) => `${Number.isFinite(n) ? n.toFixed(1) : 0}%`,
-    safeNum: (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    },
-    clamp: (v, min, max) => Math.min(max, Math.max(min, v)),
-    monthsBack: (count, base) => Array.from({ length: count }, (_, i) => {
-      const d = new Date(`${base}-01T00:00:00`);
-      d.setMonth(d.getMonth() - (count - 1 - i));
+  const U = {
+    id: () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    nowISO: () => new Date().toISOString(),
+    todayISO: () => new Date().toISOString().slice(0, 10),
+    toMonthKey: (dateISO) => String(dateISO || '').slice(0, 7),
+    thisMonth: () => new Date().toISOString().slice(0, 7),
+    esc: (s) => String(s ?? '').replace(/[&<>'"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])),
+    num: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : null; },
+    monthCmp: (a, b) => a.localeCompare(b),
+    monthsBack: (n, fromMonth) => Array.from({ length: n }, (_, i) => {
+      const d = new Date(`${fromMonth}-01T00:00:00`);
+      d.setMonth(d.getMonth() - (n - 1 - i));
       return d.toISOString().slice(0, 7);
     })
   };
 
-  const defaultData = () => ({
-    version: APP_VERSION,
-    meta: { lastBackup: null },
-    income: [],
-    expenses: [],
-    categories: [
-      { id: Util.uid(), name: 'Housing', limit: 1800 },
-      { id: Util.uid(), name: 'Food', limit: 700 },
-      { id: Util.uid(), name: 'Transport', limit: 400 },
-      { id: Util.uid(), name: 'Utilities', limit: 300 },
-      { id: Util.uid(), name: 'Leisure', limit: 450 }
-    ],
-    debts: [],
-    debtExtraPayments: [],
-    goals: [],
-    assets: [
-      { id: Util.uid(), name: 'Cash', value: 0, month: Util.monthKey() },
-      { id: Util.uid(), name: 'Investments', value: 0, month: Util.monthKey() }
-    ]
+  const defaultState = () => ({
+    schemaVersion: SCHEMA_VERSION,
+    meta: { lastSavedAt: null, lastBackupAt: null },
+    data: {
+      settings: { showCents: true, monthlyExtraPayment: 0 },
+      activeMonth: U.thisMonth(),
+      transactions: [],
+      budgets: { baseLimits: Object.fromEntries(DEFAULT_CATEGORIES.map((c) => [c, 0])), overrides: {} },
+      debts: [],
+      goals: [],
+      assets: [
+        { id: U.id(), name: 'Cash', value: 0 },
+        { id: U.id(), name: 'Investments', value: 0 },
+        { id: U.id(), name: 'Property', value: 0 }
+      ],
+      snapshots: []
+    }
   });
 
-  const StorageController = {
+  const Storage = {
+    state: defaultState(),
     load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return defaultData();
+        if (!raw) return;
         const parsed = JSON.parse(raw);
-        if (parsed.version !== APP_VERSION) return { ...defaultData(), ...parsed, version: APP_VERSION };
-        return parsed;
-      } catch {
-        return defaultData();
-      }
+        if (!parsed || typeof parsed !== 'object') return;
+        this.state = { ...defaultState(), ...parsed, schemaVersion: SCHEMA_VERSION };
+      } catch { this.state = defaultState(); }
     },
-    save(data) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    save() {
+      this.state.meta.lastSavedAt = U.nowISO();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
     },
-    export(data) {
-      data.meta.lastBackup = new Date().toISOString();
-      this.save(data);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    exportFull() {
+      this.state.meta.lastBackupAt = U.nowISO();
+      this.save();
+      this.download('budgetfor2026-full.json', this.state);
+    },
+    exportReport(reportObj, monthKey) {
+      this.download(`budget-report-${monthKey}.json`, reportObj);
+    },
+    download(name, payload) {
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `budgetos-backup-${Date.now()}.json`;
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      a.download = name;
       a.click();
       URL.revokeObjectURL(a.href);
     },
-    import(file, callback) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const imported = JSON.parse(reader.result);
-          if (!imported || typeof imported !== 'object') throw new Error('Invalid JSON');
-          callback({ ...defaultData(), ...imported, version: APP_VERSION });
-        } catch {
-          alert('Invalid backup file.');
-        }
-      };
-      reader.readAsText(file);
-    },
     reset() {
       localStorage.removeItem(STORAGE_KEY);
-      return defaultData();
+      this.state = defaultState();
+      this.save();
     }
   };
 
-  const state = {
-    data: StorageController.load(),
-    month: Util.monthKey(),
-    modalContext: null
-  };
-
-  const DataLayer = {
-    listMonthly(collection) { return state.data[collection].filter((x) => (x.month || state.month) === state.month); },
-    upsert(collection, item) {
-      const arr = state.data[collection];
-      const i = arr.findIndex((x) => x.id === item.id);
-      if (i > -1) arr[i] = item; else arr.push(item);
-      StorageController.save(state.data);
+  const Engine = {
+    recurringActive(tx, month) {
+      if (!tx.recurring) return U.toMonthKey(tx.dateISO) === month;
+      if (!tx.startMonth) return false;
+      if (U.monthCmp(tx.startMonth, month) > 0) return false;
+      if (tx.endMonth && U.monthCmp(month, tx.endMonth) > 0) return false;
+      return true;
     },
-    remove(collection, id) {
-      state.data[collection] = state.data[collection].filter((x) => x.id !== id);
-      StorageController.save(state.data);
-    }
-  };
-
-  const CalculationEngine = {
-    monthlyTotals(month = state.month) {
-      const income = state.data.income.filter((i) => i.month === month || i.recurring).reduce((s, i) => s + i.amount, 0);
-      const expenses = state.data.expenses.filter((e) => e.month === month || e.recurring).reduce((s, e) => s + e.amount, 0);
-      const debts = state.data.debts.reduce((s, d) => s + d.balance, 0);
-      const assets = state.data.assets.filter((a) => a.month === month).reduce((s, a) => s + a.value, 0);
+    monthTransactions(month) { return Storage.state.data.transactions.filter((t) => this.recurringActive(t, month)); },
+    totals(month) {
+      const tx = this.monthTransactions(month);
+      const income = tx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const expenses = tx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const debt = Storage.state.data.debts.reduce((s, d) => s + d.balance, 0);
+      const assets = Storage.state.data.assets.reduce((s, a) => s + a.value, 0);
       const net = income - expenses;
-      return { income, expenses, net, savingsRate: income ? (net / income) * 100 : 0, debts, assets, netWorth: assets - debts };
+      return { income, expenses, net, savingsRate: income ? (net / income) * 100 : 0, debt, assets, netWorth: assets - debt };
     },
-    ytdIncome() {
-      const year = state.month.slice(0, 4);
-      return state.data.income.filter((i) => i.month.startsWith(year)).reduce((s, i) => s + i.amount, 0);
+    categorySpend(month) {
+      const out = {};
+      this.monthTransactions(month).filter((t) => t.type === 'expense').forEach((t) => { out[t.category] = (out[t.category] || 0) + t.amount; });
+      return out;
     },
-    expenseByCategory(month = state.month) {
-      return state.data.expenses
-        .filter((e) => e.month === month || e.recurring)
-        .reduce((acc, e) => ((acc[e.category] = (acc[e.category] || 0) + e.amount), acc), {});
+    categoryLimit(category, month) {
+      const ov = Storage.state.data.budgets.overrides[month]?.[category];
+      return ov ?? Storage.state.data.budgets.baseLimits[category] ?? 0;
     },
-    burnRate() {
-      const day = new Date().getDate();
-      const spent = state.data.expenses.filter((e) => e.month === state.month).reduce((s, e) => s + e.amount, 0);
-      return day ? (spent / day) * 30 : 0;
+    budgetOverAmount(month) {
+      const spend = this.categorySpend(month);
+      return Object.keys(Storage.state.data.budgets.baseLimits).reduce((sum, c) => sum + Math.max(0, (spend[c] || 0) - this.categoryLimit(c, month)), 0);
     },
-    previousMonthComparison() {
-      const d = new Date(`${state.month}-01T00:00:00`);
-      d.setMonth(d.getMonth() - 1);
-      const prev = d.toISOString().slice(0, 7);
-      const curr = this.monthlyTotals(state.month).expenses;
-      const before = this.monthlyTotals(prev).expenses;
-      return before ? ((curr - before) / before) * 100 : 0;
+    fixedVariableRatio(month) {
+      const fixed = ['Housing', 'Utilities', 'Transport', 'Debt Payment'];
+      const tx = this.monthTransactions(month).filter((t) => t.type === 'expense');
+      const fixedAmt = tx.filter((t) => fixed.includes(t.category)).reduce((s, t) => s + t.amount, 0);
+      const total = tx.reduce((s, t) => s + t.amount, 0);
+      return { fixed: fixedAmt, variable: total - fixedAmt };
     },
-    fixedVariableRatio() {
-      const fixedNames = ['Housing', 'Utilities', 'Transport'];
-      const monthExp = state.data.expenses.filter((e) => e.month === state.month || e.recurring);
-      const fixed = monthExp.filter((e) => fixedNames.includes(e.category)).reduce((s, e) => s + e.amount, 0);
-      const variable = monthExp.reduce((s, e) => s + e.amount, 0) - fixed;
-      return { fixed, variable };
-    },
-    budgetAdherence() {
-      const spendByCat = this.expenseByCategory();
-      const over = state.data.categories.reduce((acc, c) => acc + Math.max(0, (spendByCat[c.name] || 0) - c.limit), 0);
-      const totalLimits = state.data.categories.reduce((s, c) => s + c.limit, 0);
-      return totalLimits ? Util.clamp(100 - (over / totalLimits) * 100, 0, 100) : 100;
-    },
-    debtRatio() {
-      const t = this.monthlyTotals();
-      return t.assets ? (t.debts / t.assets) * 100 : 100;
-    },
-    financialHealthScore() {
-      const savings = Util.clamp(this.monthlyTotals().savingsRate, 0, 40) * 1.5;
-      const debt = (100 - Util.clamp(this.debtRatio(), 0, 100)) * 0.3;
-      const adherence = this.budgetAdherence() * 0.4;
-      return Util.clamp((savings + debt + adherence) / 1.2, 0, 100);
-    },
-    goalSuggestion(goal) {
-      const months = Math.max(1, Math.ceil((new Date(goal.targetDate) - new Date()) / (1000 * 60 * 60 * 24 * 30)));
-      return Math.max(0, (goal.targetAmount - goal.currentAmount) / months);
-    },
-    debtSimulation(strategy = 'snowball') {
-      const debts = state.data.debts.map((d) => ({ ...d }));
+    debtSimulation(strategy) {
+      const debts = Storage.state.data.debts.map((d) => ({ ...d }));
       if (!debts.length) return { months: 0, interest: 0 };
-      let monthCount = 0; let totalInterest = 0;
-      const sorter = strategy === 'snowball'
-        ? (a, b) => a.balance - b.balance
-        : (a, b) => a.interestRate - b.interestRate;
-      while (debts.some((d) => d.balance > 0) && monthCount < 800) {
-        monthCount += 1;
+      const extra = Storage.state.data.settings.monthlyExtraPayment || 0;
+      let months = 0; let totalInterest = 0;
+      const sorter = strategy === 'snowball' ? (a, b) => a.balance - b.balance : (a, b) => b.apr - a.apr;
+      while (debts.some((d) => d.balance > 0.01) && months < 800) {
+        months += 1;
         debts.sort(sorter);
-        let extraPool = state.data.debtExtraPayments.reduce((s, p) => s + p.amount, 0);
-        debts.forEach((d, idx) => {
-          if (d.balance <= 0) return;
-          const monthlyRate = d.interestRate / 100 / 12;
-          const interest = d.balance * monthlyRate;
+        let extraPool = extra;
+        for (let i = 0; i < debts.length; i += 1) {
+          const d = debts[i];
+          if (d.balance <= 0) continue;
+          const interest = d.balance * (d.apr / 100 / 12);
           totalInterest += interest;
           d.balance += interest;
-          let payment = Math.min(d.minimumPayment + (idx === 0 ? extraPool : 0), d.balance);
-          if (idx === 0) extraPool = Math.max(0, extraPool - Math.max(0, payment - d.minimumPayment));
-          d.balance -= payment;
-        });
+          const pay = Math.min(d.balance, d.minPayment + (extraPool > 0 && i === 0 ? extraPool : 0));
+          if (i === 0) extraPool = Math.max(0, extraPool - Math.max(0, pay - d.minPayment));
+          d.balance -= pay;
+        }
       }
-      return { months: monthCount, interest: totalInterest };
+      return { months, interest: totalInterest };
     },
-    monthlyNetWorthTrend() {
-      return Util.monthsBack(6, state.month).map((m) => {
-        const t = this.monthlyTotals(m);
-        return { month: m, value: t.netWorth };
-      });
+    goalMonthly(goal) {
+      if (!goal.targetDate) return 0;
+      const months = Math.max(1, Math.ceil((new Date(goal.targetDate) - new Date()) / (1000 * 60 * 60 * 24 * 30)));
+      return Math.max(0, (goal.targetAmount - goal.currentAmount) / months);
     }
   };
 
   const UI = {
-    el: (id) => document.getElementById(id),
-    render() {
-      this.renderCards();
-      this.renderIncome();
-      this.renderExpenses();
-      this.renderDebts();
-      this.renderGoals();
-      this.renderAssets();
-      this.renderHealth();
-      this.renderCharts();
-      this.el('backupTimestamp').textContent = state.data.meta.lastBackup ? new Date(state.data.meta.lastBackup).toLocaleString() : 'Never';
-      this.el('monthFilter').value = state.month;
+    fmt(n) {
+      const d = Storage.state.data.settings.showCents ? 2 : 0;
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: d, maximumFractionDigits: d }).format(n || 0);
     },
-    renderCards() {
-      const t = CalculationEngine.monthlyTotals();
-      const cards = [
-        ['Monthly Income', Util.money(t.income)],
-        ['Monthly Expenses', Util.money(t.expenses)],
-        ['Net Cash Flow', Util.money(t.net)],
-        ['Savings Rate', Util.percent(t.savingsRate)],
-        ['Total Debt', Util.money(t.debts)],
-        ['Net Worth', Util.money(t.netWorth)]
-      ];
-      this.el('summaryCards').innerHTML = cards.map(([label, value]) => `<article class="card"><div class="label">${label}</div><div class="value">${value}</div></article>`).join('');
+    pct(n) { return `${(Number.isFinite(n) ? n : 0).toFixed(1)}%`; },
+    renderTable({ columns, rows, actions }) {
+      const head = columns.map((c) => `<th>${U.esc(c.label)}</th>`).join('');
+      const body = rows.length ? rows.map((row) => {
+        const tds = columns.map((c) => `<td>${U.esc(row[c.key])}</td>`).join('');
+        const actionBtns = actions.map((a) => `<button class="btn" data-action="${a.action}" data-type="${a.type}" data-id="${U.esc(row.id)}">${U.esc(a.label)}</button>`).join(' ');
+        return `<tr>${tds}<td>${actionBtns}</td></tr>`;
+      }).join('') : `<tr><td colspan="${columns.length + 1}" class="empty">No records for this view.</td></tr>`;
+      return `<table class="table"><thead><tr>${head}<th>Actions</th></tr></thead><tbody>${body}</tbody></table>`;
     },
-    table(headers, rows, actions) {
-      return `<table class="table"><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}<th></th></tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}<td>${actions(r[0])}</td></tr>`).join('')}</tbody></table>`;
+    drawBar(id, income, expense) {
+      const c = document.getElementById(id); const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height);
+      const max = Math.max(income, expense, 1); const base = c.height - 30;
+      [[income, '#5f87ff', 'Income', 120], [expense, '#ff6d84', 'Expenses', 300]].forEach(([v, col, label, left]) => {
+        const h = (v / max) * 160; x.fillStyle = col; x.fillRect(left, base - h, 90, h); x.fillStyle = '#9baac0'; x.fillText(label, left, base + 18);
+      });
     },
-    renderIncome() {
-      const rows = DataLayer.listMonthly('income').map((i) => [i.id, i.name, Util.money(i.amount), i.recurring ? 'Yes' : 'No']);
-      this.el('incomeStats').innerHTML = `<article class="card"><div class="label">YTD Income</div><div class="value">${Util.money(CalculationEngine.ytdIncome())}</div></article>`;
-      this.el('incomeTable').innerHTML = this.table(['Source', 'Amount', 'Recurring'], rows, (id) => `<button data-edit="income:${id}" class="btn">Edit</button> <button data-delete="income:${id}" class="btn danger">Delete</button>`)
-        .replaceAll('<td>undefined</td>', '');
+    drawPie(id, data) {
+      const c = document.getElementById(id); const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height);
+      const vals = Object.entries(data); const total = vals.reduce((s, [, v]) => s + v, 0) || 1;
+      const colors = ['#5f87ff', '#44d19d', '#ffb85f', '#ff6d84', '#9478ff', '#44c2d1', '#78889c'];
+      let a = -Math.PI / 2;
+      vals.slice(0, 6).forEach(([k, v], i) => {
+        const n = a + (v / total) * Math.PI * 2;
+        x.beginPath(); x.moveTo(250, 120); x.arc(250, 120, 90, a, n); x.closePath(); x.fillStyle = colors[i % colors.length]; x.fill();
+        x.fillStyle = '#9baac0'; x.fillText(k, 16, 24 + i * 16); a = n;
+      });
     },
-    renderExpenses() {
-      const byCat = CalculationEngine.expenseByCategory();
-      const rows = DataLayer.listMonthly('expenses').map((e) => [e.id, e.name, e.category, Util.money(e.amount), e.recurring ? 'Yes' : 'No']);
-      const overBudget = state.data.categories.filter((c) => (byCat[c.name] || 0) > c.limit).length;
-      this.el('expenseStats').innerHTML = `
-        <article class="card"><div class="label">Burn Rate</div><div class="value">${Util.money(CalculationEngine.burnRate())}/mo</div></article>
-        <article class="card"><div class="label">Vs Previous Month</div><div class="value">${Util.percent(CalculationEngine.previousMonthComparison())}</div></article>
-        <article class="card"><div class="label">Over Budget Categories</div><div class="value">${overBudget}</div></article>`;
-      this.el('expenseTable').innerHTML = this.table(['Name', 'Category', 'Amount', 'Recurring'], rows, (id) => `<button data-edit="expense:${id}" class="btn">Edit</button> <button data-delete="expense:${id}" class="btn danger">Delete</button>`)
-        .replaceAll('<td>undefined</td>', '');
+    drawLine(id, values, labels, color = '#5f87ff') {
+      const c = document.getElementById(id); const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height);
+      const min = Math.min(...values, 0), max = Math.max(...values, 1), span = Math.max(1, max - min);
+      x.strokeStyle = '#263446'; x.beginPath(); x.moveTo(40, c.height - 30); x.lineTo(c.width - 20, c.height - 30); x.stroke();
+      x.strokeStyle = color; x.beginPath();
+      values.forEach((v, i) => {
+        const px = 50 + i * ((c.width - 80) / Math.max(1, values.length - 1));
+        const py = c.height - 40 - ((v - min) / span) * (c.height - 70);
+        if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
+        x.fillStyle = '#9baac0'; x.fillText(labels[i].slice(5), px - 8, c.height - 8);
+      });
+      x.stroke();
+    },
+    refresh() {
+      const { data, meta } = Storage.state;
+      const m = data.activeMonth;
+      document.getElementById('activeMonth').value = m;
+      document.getElementById('lastSaved').textContent = meta.lastSavedAt ? new Date(meta.lastSavedAt).toLocaleString() : '—';
+      document.getElementById('lastBackup').textContent = meta.lastBackupAt ? new Date(meta.lastBackupAt).toLocaleString() : '—';
+      document.getElementById('toggleCents').checked = data.settings.showCents;
+      this.renderDashboard(); this.renderTransactions(); this.renderBudgets(); this.renderDebts(); this.renderGoals(); this.renderReports();
+    },
+    renderDashboard() {
+      const t = Engine.totals(Storage.state.data.activeMonth);
+      const cards = [['Income', this.fmt(t.income)], ['Expenses', this.fmt(t.expenses)], ['Net Cash Flow', this.fmt(t.net)], ['Savings Rate', this.pct(t.savingsRate)], ['Total Debt', this.fmt(t.debt)], ['Net Worth', this.fmt(t.netWorth)]];
+      document.getElementById('summaryCards').innerHTML = cards.map(([l, v]) => `<div class="card stat"><div class="label">${U.esc(l)}</div><div class="value">${U.esc(v)}</div></div>`).join('');
+      this.drawBar('chartBar', t.income, t.expenses);
+      this.drawPie('chartPie', Engine.categorySpend(Storage.state.data.activeMonth));
+      const months = U.monthsBack(6, Storage.state.data.activeMonth);
+      this.drawLine('chartTrend', months.map((mk) => Engine.totals(mk).net), months);
+    },
+    renderTransactions() {
+      const m = Storage.state.data.activeMonth;
+      const q = document.getElementById('searchTx').value.toLowerCase();
+      const cat = document.getElementById('filterCategory').value;
+      const cats = ['', ...Object.keys(Storage.state.data.budgets.baseLimits)];
+      document.getElementById('filterCategory').innerHTML = cats.map((c) => `<option value="${U.esc(c)}">${c || 'All categories'}</option>`).join('');
+      const rows = Engine.monthTransactions(m)
+        .filter((t) => (!q || t.name.toLowerCase().includes(q)) && (!cat || t.category === cat))
+        .map((t) => ({ id: t.id, date: t.dateISO, type: t.type, name: t.name, category: t.category, amount: this.fmt(t.amount), recurring: t.recurring ? `Yes (${t.startMonth}${t.endMonth ? `→${t.endMonth}` : ''})` : 'No' }));
+      document.getElementById('transactionsTable').innerHTML = this.renderTable({
+        columns: [{ key: 'date', label: 'Date' }, { key: 'type', label: 'Type' }, { key: 'name', label: 'Description' }, { key: 'category', label: 'Category' }, { key: 'amount', label: 'Amount' }, { key: 'recurring', label: 'Recurring' }],
+        rows,
+        actions: [{ action: 'edit', type: 'transaction', label: 'Edit' }, { action: 'delete', type: 'transaction', label: 'Delete' }]
+      });
+    },
+    renderBudgets() {
+      const m = Storage.state.data.activeMonth; const spend = Engine.categorySpend(m);
+      const cats = Object.keys(Storage.state.data.budgets.baseLimits);
+      const html = cats.length ? cats.map((c) => {
+        const lim = Engine.categoryLimit(c, m); const used = spend[c] || 0; const pct = lim > 0 ? Math.min(100, (used / lim) * 100) : 0;
+        return `<div><div class="toolbar"><strong>${U.esc(c)}</strong><span class="${used > lim && lim > 0 ? 'bad' : 'ok'}">${this.fmt(used)} / ${this.fmt(lim)}</span></div><div class="progress"><span style="width:${pct}%"></span></div></div>`;
+      }).join('<hr style="border-color:var(--line)">') : '<p class="empty">No budget categories.</p>';
+      document.getElementById('budgetList').innerHTML = html;
     },
     renderDebts() {
-      const rows = state.data.debts.map((d) => [d.id, d.name, Util.money(d.balance), `${d.interestRate}%`, Util.money(d.minimumPayment)]);
-      this.el('debtTable').innerHTML = this.table(['Name', 'Balance', 'Rate', 'Minimum'], rows, (id) => `<button data-edit="debt:${id}" class="btn">Edit</button> <button data-delete="debt:${id}" class="btn danger">Delete</button>`)
-        .replaceAll('<td>undefined</td>', '');
-      const snow = CalculationEngine.debtSimulation('snowball');
-      const ava = CalculationEngine.debtSimulation('avalanche');
-      this.el('debtSimulation').innerHTML = `
-        <h3>Strategy Comparison</h3>
-        <p>Snowball: ${snow.months} months, ${Util.money(snow.interest)} interest.</p>
-        <p>Avalanche: ${ava.months} months, ${Util.money(ava.interest)} interest.</p>
-        <p>Time saved: <strong>${Math.max(0, snow.months - ava.months)} months</strong></p>
-        <button class="btn" data-open-modal="extraPayModal">Log Extra Payment</button>`;
+      const debts = Storage.state.data.debts;
+      if (!debts.length) document.getElementById('debtList').innerHTML = '<p class="empty">No debts yet.</p>';
+      else document.getElementById('debtList').innerHTML = debts.map((d) => `<div><div class="toolbar"><strong>${U.esc(d.name)}</strong><span>${this.fmt(d.balance)} @ ${d.apr}%</span></div><div class="muted">Min payment: ${this.fmt(d.minPayment)}</div><div class="toolbar right"><button class="btn" data-action="edit" data-type="debt" data-id="${d.id}">Edit</button><button class="btn" data-action="delete" data-type="debt" data-id="${d.id}">Delete</button></div></div>`).join('<hr style="border-color:var(--line)">');
+      const snow = Engine.debtSimulation('snowball');
+      const ava = Engine.debtSimulation('avalanche');
+      document.getElementById('debtSimulator').innerHTML = `<label>Monthly extra payment <input id="monthlyExtra" type="number" min="0" step="0.01" value="${Storage.state.data.settings.monthlyExtraPayment || 0}"></label>
+        <table class="table"><thead><tr><th>Method</th><th>Months</th><th>Interest</th></tr></thead><tbody>
+        <tr><td>Snowball</td><td>${snow.months}</td><td>${this.fmt(snow.interest)}</td></tr>
+        <tr><td>Avalanche</td><td>${ava.months}</td><td>${this.fmt(ava.interest)}</td></tr>
+        <tr><td><strong>Months saved (best)</strong></td><td colspan="2">${Math.max(0, snow.months - ava.months)}</td></tr>
+        </tbody></table>`;
     },
     renderGoals() {
-      const rows = state.data.goals.map((g) => [g.id, g.name, Util.money(g.currentAmount), Util.money(g.targetAmount), g.targetDate, Util.money(CalculationEngine.goalSuggestion(g))]);
-      this.el('goalTable').innerHTML = this.table(['Goal', 'Current', 'Target', 'Date', 'Suggested/mo'], rows, (id) => `<button data-edit="goal:${id}" class="btn">Edit</button> <button data-delete="goal:${id}" class="btn danger">Delete</button>`)
-        .replaceAll('<td>undefined</td>', '');
+      const t = Engine.totals(Storage.state.data.activeMonth);
+      const html = Storage.state.data.goals.length ? Storage.state.data.goals.map((g) => `<div><div class="toolbar"><strong>${U.esc(g.name)}</strong><span>${this.fmt(g.currentAmount)} / ${this.fmt(g.targetAmount)}</span></div><div class="muted">Recommended monthly: ${this.fmt(Engine.goalMonthly(g))}</div><div class="muted">Allocate leftover suggestion: ${this.fmt(Math.max(0, t.net))}</div><div class="toolbar right"><button class="btn" data-action="edit" data-type="goal" data-id="${g.id}">Edit</button><button class="btn" data-action="delete" data-type="goal" data-id="${g.id}">Delete</button></div></div>`).join('<hr style="border-color:var(--line)">') : '<p class="empty">No goals yet.</p>';
+      document.getElementById('goalList').innerHTML = html;
     },
-    renderAssets() {
-      const rows = state.data.assets.filter((a) => a.month === state.month).map((a) => [a.id, a.name, Util.money(a.value)]);
-      this.el('assetTable').innerHTML = this.table(['Asset', 'Value'], rows, (id) => `<button data-edit="asset:${id}" class="btn">Edit</button> <button data-delete="asset:${id}" class="btn danger">Delete</button>`)
-        .replaceAll('<td>undefined</td>', '');
-    },
-    renderHealth() {
-      const score = CalculationEngine.financialHealthScore();
-      const ratio = CalculationEngine.fixedVariableRatio();
-      this.el('healthPanel').innerHTML = `
-        <p>Score: <strong>${score.toFixed(0)}/100</strong></p>
-        <div class="health-meter"><span style="width:${score}%"></span></div>
-        <p>Budget adherence: ${Util.percent(CalculationEngine.budgetAdherence())}</p>
-        <p>Fixed vs variable: ${Util.money(ratio.fixed)} / ${Util.money(ratio.variable)}</p>`;
-    },
-    chart(ctxId, draw) {
-      const c = this.el(ctxId); const ctx = c.getContext('2d');
-      ctx.clearRect(0, 0, c.width, c.height);
-      draw(ctx, c.width, c.height);
-    },
-    renderCharts() {
-      const totals = CalculationEngine.monthlyTotals();
-      this.chart('barChart', (ctx, w, h) => {
-        const max = Math.max(totals.income, totals.expenses, 1); const base = h - 40;
-        [['Income', totals.income, '#5e8bff', 110], ['Expenses', totals.expenses, '#ff6d7a', 320]].forEach(([label, val, color, x]) => {
-          const barH = (val / max) * (h - 80);
-          ctx.fillStyle = color; ctx.fillRect(x, base - barH, 120, barH);
-          ctx.fillStyle = '#97a6c6'; ctx.fillText(String(label), x + 35, h - 12);
-        });
-      });
-      const byCat = CalculationEngine.expenseByCategory();
-      this.chart('pieChart', (ctx, w, h) => {
-        const total = Object.values(byCat).reduce((s, v) => s + v, 0) || 1;
-        const colors = ['#5e8bff', '#39d98a', '#f6bf5f', '#ff6d7a', '#8f7fff', '#49c5b6'];
-        let angle = -Math.PI / 2;
-        Object.entries(byCat).forEach(([name, value], i) => {
-          const next = angle + (value / total) * Math.PI * 2;
-          ctx.beginPath(); ctx.moveTo(w / 2, h / 2); ctx.arc(w / 2, h / 2, 90, angle, next); ctx.closePath();
-          ctx.fillStyle = colors[i % colors.length]; ctx.fill(); angle = next;
-          ctx.fillStyle = '#97a6c6'; ctx.fillText(name, 20, 20 + i * 18);
-        });
-      });
-      this.chart('trendChart', (ctx, w, h) => {
-        const months = Util.monthsBack(6, state.month);
-        const points = months.map((m) => CalculationEngine.monthlyTotals(m).net);
-        const min = Math.min(...points, 0); const max = Math.max(...points, 1); const span = Math.max(1, max - min);
-        ctx.strokeStyle = '#233047'; ctx.beginPath(); ctx.moveTo(40, h - 30); ctx.lineTo(w - 20, h - 30); ctx.stroke();
-        ctx.strokeStyle = '#5e8bff'; ctx.beginPath();
-        points.forEach((v, i) => {
-          const x = 50 + (i * (w - 90)) / (points.length - 1);
-          const y = h - 40 - ((v - min) / span) * (h - 70);
-          if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-          ctx.fillStyle = '#97a6c6'; ctx.fillText(months[i].slice(5), x - 8, h - 10);
-        });
-        ctx.stroke();
-      });
-      this.chart('netWorthChart', (ctx, w, h) => {
-        const trend = CalculationEngine.monthlyNetWorthTrend();
-        const vals = trend.map((t) => t.value); const min = Math.min(...vals, 0); const max = Math.max(...vals, 1); const span = Math.max(1, max - min);
-        ctx.strokeStyle = '#39d98a'; ctx.beginPath();
-        trend.forEach((t, i) => {
-          const x = 40 + (i * (w - 70)) / (trend.length - 1);
-          const y = h - 35 - ((t.value - min) / span) * (h - 65);
-          if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-          ctx.fillStyle = '#97a6c6'; ctx.fillText(t.month.slice(5), x - 8, h - 10);
-        });
-        ctx.stroke();
-      });
+    renderReports() {
+      const m = Storage.state.data.activeMonth; const t = Engine.totals(m); const r = Engine.fixedVariableRatio(m);
+      document.getElementById('reportSummary').innerHTML = `<h3>Monthly Summary (${m})</h3><div class="grid two"><p>Income: ${this.fmt(t.income)}</p><p>Expenses: ${this.fmt(t.expenses)}</p><p>Net cash flow: ${this.fmt(t.net)}</p><p>Savings rate: ${this.pct(t.savingsRate)}</p><p>Over-budget amount: ${this.fmt(Engine.budgetOverAmount(m))}</p><p>Fixed / Variable: ${this.fmt(r.fixed)} / ${this.fmt(r.variable)}</p></div>`;
+      const spend = Engine.categorySpend(m); const entries = Object.entries(spend).sort((a, b) => b[1] - a[1]);
+      const top = entries.slice(0, 6); const other = entries.slice(6).reduce((s, [, v]) => s + v, 0); if (other) top.push(['Other', other]);
+      document.getElementById('reportCategory').innerHTML = `<h3>Category Breakdown</h3>${this.renderTable({ columns: [{ key: 'category', label: 'Category' }, { key: 'amount', label: 'Amount' }], rows: top.map(([k, v], i) => ({ id: `r${i}`, category: k, amount: this.fmt(v) })), actions: [] })}`;
+      this.drawPie('reportPie', Object.fromEntries(top));
+      const metric = document.getElementById('reportTrendMetric').value;
+      const months = U.monthsBack(6, m);
+      const vals = months.map((mk) => { const tt = Engine.totals(mk); return metric === 'income' ? tt.income : metric === 'expense' ? tt.expenses : tt.net; });
+      this.drawLine('reportTrend', vals, months, metric === 'expense' ? '#ff6d84' : '#5f87ff');
     }
   };
 
-  const forms = {
-    incomeModal: { title: 'Income', collection: 'income', fields: [['name', 'text'], ['amount', 'number'], ['month', 'month'], ['recurring', 'checkbox']] },
-    expenseModal: { title: 'Expense', collection: 'expenses', fields: [['name', 'text'], ['category', 'select'], ['amount', 'number'], ['month', 'month'], ['recurring', 'checkbox']] },
-    debtModal: { title: 'Debt', collection: 'debts', fields: [['name', 'text'], ['balance', 'number'], ['interestRate', 'number'], ['minimumPayment', 'number']] },
-    goalModal: { title: 'Goal', collection: 'goals', fields: [['name', 'text'], ['currentAmount', 'number'], ['targetAmount', 'number'], ['targetDate', 'date']] },
-    assetModal: { title: 'Asset', collection: 'assets', fields: [['name', 'text'], ['value', 'number'], ['month', 'month']] },
-    extraPayModal: { title: 'Extra Debt Payment', collection: 'debtExtraPayments', fields: [['name', 'text'], ['amount', 'number']] },
-    categoryModal: { title: 'Category Limit', collection: 'categories', fields: [['name', 'text'], ['limit', 'number']] }
-  };
-
-  const EventController = {
-    init() {
-      document.getElementById('spaNav').addEventListener('click', this.handleNav);
-      document.body.addEventListener('click', this.handleClicks.bind(this));
-      document.getElementById('monthFilter').addEventListener('change', (e) => { state.month = e.target.value; UI.render(); });
-      document.getElementById('dynamicForm').addEventListener('submit', this.submitForm);
-      document.getElementById('exportBtn').addEventListener('click', () => { StorageController.export(state.data); UI.render(); });
-      document.getElementById('importInput').addEventListener('change', (e) => e.target.files[0] && StorageController.import(e.target.files[0], (d) => { state.data = d; StorageController.save(d); UI.render(); }));
-      document.getElementById('resetBtn').addEventListener('click', () => {
-        if (confirm('This will erase everything. Continue?') && confirm('Final confirmation: permanently reset data?')) {
-          state.data = StorageController.reset(); UI.render();
+  const Modal = {
+    open(type, mode, id) {
+      const d = Storage.state.data; const activeMonth = d.activeMonth;
+      const record = id ? (type === 'transaction' ? d.transactions.find((x) => x.id === id) : d[`${type}s`]?.find((x) => x.id === id)) : null;
+      const formDefs = {
+        transaction: { title: `${mode === 'edit' ? 'Edit' : 'Add'} Transaction`, fields: [
+          ['type', 'select', true, ['income', 'expense']], ['name', 'text', true], ['category', 'text', true], ['amount', 'number', true], ['dateISO', 'date', true], ['recurring', 'checkbox', false], ['startMonth', 'month', false], ['endMonth', 'month', false]
+        ] },
+        budget: { title: 'Budget Limit', fields: [['category', 'text', true], ['baseLimit', 'number', true], ['overrideMonth', 'month', false], ['overrideLimit', 'number', false]] },
+        debt: { title: `${mode === 'edit' ? 'Edit' : 'Add'} Debt`, fields: [['name', 'text', true], ['balance', 'number', true], ['apr', 'number', true], ['minPayment', 'number', true]] },
+        payment: { title: 'Record Debt Payment', fields: [['debtId', 'select', true, d.debts.map((x) => x.id)], ['amount', 'number', true], ['dateISO', 'date', true]] },
+        goal: { title: `${mode === 'edit' ? 'Edit' : 'Add'} Goal`, fields: [['name', 'text', true], ['targetAmount', 'number', true], ['currentAmount', 'number', true], ['targetDate', 'date', false]] }
+      };
+      const cfg = formDefs[type]; if (!cfg) return;
+      const defaults = { type: 'expense', dateISO: U.todayISO(), recurring: false, startMonth: activeMonth, endMonth: '', overrideMonth: activeMonth };
+      const row = { ...defaults, ...(record || {}) };
+      document.getElementById('modalTitle').textContent = cfg.title;
+      document.getElementById('modal').dataset.type = type;
+      document.getElementById('modal').dataset.mode = mode;
+      document.getElementById('modal').dataset.id = id || '';
+      document.getElementById('modalFields').innerHTML = cfg.fields.map(([k, t, req, opts]) => {
+        const v = row[k] ?? '';
+        if (t === 'checkbox') return `<label class="field"><span>${k}</span><input name="${k}" type="checkbox" ${v ? 'checked' : ''}></label>`;
+        if (t === 'select') {
+          const options = (opts || []).map((o) => `<option value="${U.esc(o)}" ${String(o) === String(v) ? 'selected' : ''}>${U.esc(type === 'payment' && k === 'debtId' ? d.debts.find((x) => x.id === o)?.name || o : o)}</option>`).join('');
+          return `<label class="field"><span>${k}</span><select name="${k}" ${req ? 'required' : ''}>${options}</select></label>`;
         }
-      });
-      document.getElementById('quickAddBtn').addEventListener('click', () => this.openModal('expenseModal'));
-    },
-    handleNav(e) {
-      const btn = e.target.closest('.nav-link'); if (!btn) return;
-      document.querySelectorAll('.nav-link').forEach((n) => n.classList.remove('active'));
-      btn.classList.add('active');
-      const view = btn.dataset.view;
-      document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-      document.getElementById(view).classList.add('active');
-      document.getElementById('viewTitle').textContent = btn.textContent;
-    },
-    handleClicks(e) {
-      const close = e.target.closest('[data-close-modal]');
-      if (close) UI.el('formModal').close();
-      const open = e.target.closest('[data-open-modal]');
-      if (open) this.openModal(open.dataset.openModal);
-      const del = e.target.closest('[data-delete]');
-      if (del) {
-        const [collection, id] = del.dataset.delete.split(':');
-        if (confirm('Are you sure you want to delete this item?')) {
-          const key = collection === 'expense' ? 'expenses' : `${collection}${collection.endsWith('s') ? '' : 's'}`;
-          DataLayer.remove(key, id); UI.render();
-        }
-      }
-      const edit = e.target.closest('[data-edit]');
-      if (edit) {
-        const [type, id] = edit.dataset.edit.split(':');
-        const map = { income: 'income', expense: 'expenses', debt: 'debts', goal: 'goals', asset: 'assets' };
-        this.openModal(`${type}Modal`, state.data[map[type]].find((x) => x.id === id));
-      }
-    },
-    openModal(formKey, item = null) {
-      const config = forms[formKey]; if (!config) return;
-      state.modalContext = { config, item };
-      UI.el('formModalTitle').textContent = `${item ? 'Edit' : 'Add'} ${config.title}`;
-      UI.el('formFields').innerHTML = config.fields.map(([name, type]) => {
-        const value = item ? item[name] : (name === 'month' ? state.month : type === 'checkbox' ? false : '');
-        if (type === 'select') {
-          return `<label class="field">${name}<select name="${name}">${state.data.categories.map((c) => `<option ${c.name === value ? 'selected' : ''}>${c.name}</option>`).join('')}</select></label>`;
-        }
-        return `<label class="field">${name}<input name="${name}" type="${type}" ${type === 'checkbox' ? (value ? 'checked' : '') : `value="${value ?? ''}"`} ${type === 'number' ? 'min="0" step="0.01"' : ''} required="${type === 'checkbox' ? '' : 'required'}"></label>`;
+        return `<label class="field"><span>${k}</span><input name="${k}" type="${t}" value="${U.esc(v)}" ${req ? 'required' : ''} ${t === 'number' ? 'min="0" step="0.01"' : ''}></label>`;
       }).join('');
-      UI.el('formError').textContent = '';
-      UI.el('formModal').showModal();
+      document.getElementById('modalError').textContent = '';
+      document.getElementById('modal').showModal();
     },
-    submitForm(e) {
-      e.preventDefault();
-      const ctx = state.modalContext; if (!ctx) return;
-      const formData = new FormData(e.target);
-      const payload = { id: ctx.item?.id || Util.uid() };
-      for (const [name, type] of ctx.config.fields) {
-        if (type === 'checkbox') payload[name] = !!e.target.elements[name]?.checked;
-        else if (type === 'number') {
-          const n = Util.safeNum(formData.get(name));
-          if (n === null) return UI.el('formError').textContent = `${name} must be a valid non-negative number.`;
-          payload[name] = n;
-        } else payload[name] = String(formData.get(name) || '').trim();
+    close() { document.getElementById('modal').close(); }
+  };
+
+  const Events = {
+    bind() {
+      document.getElementById('nav').addEventListener('click', (e) => {
+        const btn = e.target.closest('.nav-btn'); if (!btn) return;
+        document.querySelectorAll('.nav-btn').forEach((b) => b.classList.remove('active')); btn.classList.add('active');
+        document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+        document.getElementById(btn.dataset.view).classList.add('active');
+        document.getElementById('viewTitle').textContent = btn.textContent;
+      });
+
+      document.body.addEventListener('click', (e) => {
+        if (e.target.closest('[data-close-modal]')) Modal.close();
+        const open = e.target.closest('[data-open-modal]');
+        if (open) Modal.open(open.dataset.openModal, open.dataset.mode || 'create', open.dataset.id || '');
+        const act = e.target.closest('[data-action]');
+        if (act) this.handleAction(act.dataset.action, act.dataset.type, act.dataset.id);
+      });
+
+      document.getElementById('modalForm').addEventListener('submit', this.submitModal);
+      document.getElementById('activeMonth').addEventListener('change', (e) => { Storage.state.data.activeMonth = e.target.value; Storage.save(); UI.refresh(); });
+      document.getElementById('searchTx').addEventListener('input', () => UI.renderTransactions());
+      document.getElementById('filterCategory').addEventListener('change', () => UI.renderTransactions());
+      document.getElementById('reportTrendMetric').addEventListener('change', () => UI.renderReports());
+      document.getElementById('toggleCents').addEventListener('change', (e) => { Storage.state.data.settings.showCents = e.target.checked; Storage.save(); UI.refresh(); });
+      document.getElementById('saveSnapshot').addEventListener('click', () => { Storage.state.data.snapshots.push({ month: Storage.state.data.activeMonth, netWorth: Engine.totals(Storage.state.data.activeMonth).netWorth, createdAt: U.nowISO() }); Storage.save(); UI.refresh(); });
+      document.getElementById('exportData').addEventListener('click', () => { Storage.exportFull(); UI.refresh(); });
+      document.getElementById('exportReport').addEventListener('click', () => Storage.exportReport({ month: Storage.state.data.activeMonth, summary: Engine.totals(Storage.state.data.activeMonth), category: Engine.categorySpend(Storage.state.data.activeMonth) }, Storage.state.data.activeMonth));
+      document.getElementById('importData').addEventListener('change', this.importJSON);
+      document.getElementById('resetData').addEventListener('click', () => {
+        if (confirm('Reset all local data?\nThis action cannot be undone.') && confirm('Please confirm again: permanently delete all saved budgeting data?')) {
+          Storage.reset(); UI.refresh();
+        }
+      });
+      document.getElementById('debts').addEventListener('input', (e) => {
+        if (e.target.id === 'monthlyExtra') {
+          const n = U.num(e.target.value); if (n === null) return;
+          Storage.state.data.settings.monthlyExtraPayment = n; Storage.save(); UI.renderDebts();
+        }
+      });
+      window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.getElementById('modal').open) Modal.close(); });
+    },
+    handleAction(action, type, id) {
+      const map = { transaction: 'transactions', debt: 'debts', goal: 'goals' };
+      if (action === 'edit') Modal.open(type, 'edit', id);
+      if (action === 'delete' && confirm('Delete this item?')) {
+        Storage.state.data[map[type]] = Storage.state.data[map[type]].filter((x) => x.id !== id);
+        Storage.save(); UI.refresh();
       }
-      if (!payload.name) return UI.el('formError').textContent = 'Name is required.';
-      DataLayer.upsert(ctx.config.collection, payload);
-      UI.el('formModal').close();
-      UI.render();
+    },
+    submitModal(e) {
+      e.preventDefault();
+      const modal = document.getElementById('modal');
+      const type = modal.dataset.type; const mode = modal.dataset.mode; const id = modal.dataset.id;
+      const fd = new FormData(e.target); const out = { id: id || U.id() };
+      const needPositive = ['amount', 'baseLimit', 'overrideLimit', 'balance', 'apr', 'minPayment', 'targetAmount', 'currentAmount'];
+      for (const [k, v] of fd.entries()) {
+        if (needPositive.includes(k)) { const n = U.num(v); if (n === null) return document.getElementById('modalError').textContent = `${k} must be a non-negative number`; out[k] = n; }
+        else out[k] = String(v).trim();
+      }
+      out.recurring = !!e.target.elements.recurring?.checked;
+      if ((type === 'transaction' && (!out.name || !out.dateISO || !out.category)) || ((type === 'debt' || type === 'goal') && !out.name)) return document.getElementById('modalError').textContent = 'Please fill all required fields.';
+
+      if (type === 'transaction') {
+        if (!out.startMonth) out.startMonth = Storage.state.data.activeMonth;
+        if (!out.recurring) { out.startMonth = ''; out.endMonth = ''; }
+        const arr = Storage.state.data.transactions; const idx = arr.findIndex((x) => x.id === out.id); if (idx > -1) arr[idx] = out; else arr.push(out);
+      } else if (type === 'budget') {
+        Storage.state.data.budgets.baseLimits[out.category] = out.baseLimit;
+        if (out.overrideMonth) {
+          Storage.state.data.budgets.overrides[out.overrideMonth] = Storage.state.data.budgets.overrides[out.overrideMonth] || {};
+          Storage.state.data.budgets.overrides[out.overrideMonth][out.category] = out.overrideLimit || 0;
+        }
+      } else if (type === 'debt') {
+        const arr = Storage.state.data.debts; const idx = arr.findIndex((x) => x.id === out.id); if (idx > -1) arr[idx] = out; else arr.push(out);
+      } else if (type === 'goal') {
+        const arr = Storage.state.data.goals; const idx = arr.findIndex((x) => x.id === out.id); if (idx > -1) arr[idx] = out; else arr.push(out);
+      } else if (type === 'payment') {
+        const debt = Storage.state.data.debts.find((d) => d.id === out.debtId); if (!debt) return document.getElementById('modalError').textContent = 'Debt not found.';
+        debt.balance = Math.max(0, debt.balance - out.amount);
+        Storage.state.data.transactions.push({ id: U.id(), type: 'expense', name: `Debt payment: ${debt.name}`, category: 'Debt Payment', amount: out.amount, dateISO: out.dateISO || U.todayISO(), recurring: false, startMonth: '', endMonth: '' });
+      }
+      Storage.save(); Modal.close(); UI.refresh();
+    },
+    importJSON(e) {
+      const file = e.target.files?.[0]; if (!file) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const parsed = JSON.parse(r.result);
+          const preview = parsed?.data ? `transactions:${parsed.data.transactions?.length || 0}, debts:${parsed.data.debts?.length || 0}, goals:${parsed.data.goals?.length || 0}` : 'Invalid structure';
+          document.getElementById('importPreview').textContent = `Preview -> ${preview}`;
+          if (!parsed?.data || !confirm('Apply imported data?')) return;
+          Storage.state = { ...defaultState(), ...parsed, schemaVersion: SCHEMA_VERSION };
+          Storage.save(); UI.refresh();
+        } catch {
+          document.getElementById('importPreview').textContent = 'Import failed: invalid JSON file.';
+        }
+      };
+      r.readAsText(file);
     }
   };
 
-  EventController.init();
-  UI.render();
+  Storage.load();
+  Storage.save();
+  Events.bind();
+  UI.refresh();
 })();
