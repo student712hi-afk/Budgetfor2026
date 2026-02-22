@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Budget Control Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary">
+        <div class="brand">Budget<span>OS</span></div>
+        <nav class="nav" id="spaNav">
+          <button class="nav-link active" data-view="dashboard">Dashboard</button>
+          <button class="nav-link" data-view="income">Income</button>
+          <button class="nav-link" data-view="expenses">Expenses</button>
+          <button class="nav-link" data-view="debts">Debt Planner</button>
+          <button class="nav-link" data-view="goals">Goals</button>
+          <button class="nav-link" data-view="networth">Net Worth</button>
+          <button class="nav-link" data-view="settings">Data</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="viewTitle">Dashboard</h1>
+            <p class="subtle">Last backup: <span id="backupTimestamp">Never</span></p>
+          </div>
+          <div class="topbar-actions">
+            <label for="monthFilter" class="sr-only">Month filter</label>
+            <input id="monthFilter" type="month" />
+            <button id="quickAddBtn" class="btn primary">+ Quick Add</button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="view active">
+          <div class="cards-grid" id="summaryCards"></div>
+
+          <div class="panel-grid two-col">
+            <article class="panel">
+              <h2>Income vs Expense</h2>
+              <canvas id="barChart" width="560" height="260" aria-label="Income vs expense bar chart"></canvas>
+            </article>
+            <article class="panel">
+              <h2>Expense Categories</h2>
+              <canvas id="pieChart" width="560" height="260" aria-label="Expense category pie chart"></canvas>
+            </article>
+          </div>
+
+          <div class="panel-grid">
+            <article class="panel">
+              <h2>6-Month Cash Flow Trend</h2>
+              <canvas id="trendChart" width="1160" height="280" aria-label="Cash flow trend"></canvas>
+            </article>
+            <article class="panel">
+              <h2>Financial Health</h2>
+              <div id="healthPanel"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="income" class="view">
+          <div class="view-header">
+            <h2>Income Streams</h2>
+            <button class="btn primary" data-open-modal="incomeModal">Add Income</button>
+          </div>
+          <div class="stats-row" id="incomeStats"></div>
+          <div class="panel"><div id="incomeTable"></div></div>
+        </section>
+
+        <section id="expenses" class="view">
+          <div class="view-header">
+            <h2>Expenses</h2>
+            <div class="button-group">
+              <button class="btn" data-open-modal="categoryModal">Category Limits</button>
+              <button class="btn primary" data-open-modal="expenseModal">Add Expense</button>
+            </div>
+          </div>
+          <div class="stats-row" id="expenseStats"></div>
+          <div class="panel"><div id="expenseTable"></div></div>
+        </section>
+
+        <section id="debts" class="view">
+          <div class="view-header">
+            <h2>Debt Payoff Simulator</h2>
+            <button class="btn primary" data-open-modal="debtModal">Add Debt</button>
+          </div>
+          <div class="panel-grid two-col">
+            <article class="panel"><div id="debtTable"></div></article>
+            <article class="panel"><div id="debtSimulation"></div></article>
+          </div>
+        </section>
+
+        <section id="goals" class="view">
+          <div class="view-header">
+            <h2>Savings Goals</h2>
+            <button class="btn primary" data-open-modal="goalModal">Add Goal</button>
+          </div>
+          <div class="panel"><div id="goalTable"></div></div>
+        </section>
+
+        <section id="networth" class="view">
+          <div class="view-header">
+            <h2>Net Worth Tracker</h2>
+            <button class="btn primary" data-open-modal="assetModal">Add Asset</button>
+          </div>
+          <div class="panel-grid two-col">
+            <article class="panel"><div id="assetTable"></div></article>
+            <article class="panel"><canvas id="netWorthChart" width="560" height="300"></canvas></article>
+          </div>
+        </section>
+
+        <section id="settings" class="view">
+          <div class="view-header"><h2>Data Management</h2></div>
+          <article class="panel settings-panel">
+            <button id="exportBtn" class="btn">Export JSON</button>
+            <label class="btn" for="importInput" role="button">Import JSON</label>
+            <input id="importInput" type="file" accept="application/json" />
+            <button id="resetBtn" class="btn danger">Reset All Data</button>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="formModal" aria-labelledby="formModalTitle">
+      <form id="dynamicForm" method="dialog">
+        <div class="modal-head">
+          <h3 id="formModalTitle"></h3>
+          <button type="button" class="icon-btn" data-close-modal>&times;</button>
+        </div>
+        <div id="formFields"></div>
+        <p id="formError" class="error"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-close-modal>Cancel</button>
+          <button type="submit" class="btn primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="script.js"></script>
+  </body>
+</html>
